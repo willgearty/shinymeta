@@ -144,3 +144,66 @@ describe("metaAction", {
     expect_identical(i, 4)
   })
 })
+
+describe("!!as.symbol() simplification", isolate({
+  it("simplifies !!as.symbol('foo') to foo in generated code", {
+    input <- list(var = as.name("mpg"))
+    mr <- metaReactive({
+      mtcars %>%
+        dplyr::group_by(cyl) %>%
+        dplyr::summarise(mean_mpg = mean(!!..(input$var)))
+    })
+    code <- paste(formatCode(withMetaMode(mr())), collapse = "\n")
+    expect_match(code, "mean\\(mpg\\)")
+    expect_false(grepl("as.symbol", code, fixed = TRUE))
+  })
+
+  it("simplifies !!sym('foo') to foo", {
+    input <- list(var = "mpg")
+    mr <- metaReactive({
+      mtcars %>% dplyr::summarise(avg = mean(!!sym(..(input$var))))
+    })
+    code <- paste(formatCode(withMetaMode(mr())), collapse = "\n")
+    expect_match(code, "mean\\(mpg\\)")
+    expect_false(grepl("sym\\(", code))
+  })
+
+  it("simplifies !!rlang::sym('foo') to foo", {
+    input <- list(var = "mpg")
+    mr <- metaReactive({
+      mtcars %>% dplyr::summarise(avg = mean(!!rlang::sym(..(input$var))))
+    })
+    code <- paste(formatCode(withMetaMode(mr())), collapse = "\n")
+    expect_match(code, "mean\\(mpg\\)")
+  })
+
+  it("simplifies !!as.name('foo') to foo", {
+    input <- list(var = "mpg")
+    mr <- metaReactive({
+      mtcars %>% dplyr::summarise(avg = mean(!!as.name(..(input$var))))
+    })
+    code <- paste(formatCode(withMetaMode(mr())), collapse = "\n")
+    expect_match(code, "mean\\(mpg\\)")
+  })
+
+  it("leaves as.symbol() alone when not wrapped in !!", {
+    input <- list(var = as.name("mpg"))
+    mr <- metaReactive({
+      v <- ..(input$var)
+      print(v)
+    })
+    code <- paste(formatCode(withMetaMode(mr())), collapse = "\n")
+    # bare ..(symbol) outside !! should still be defensive
+    expect_match(code, "as.symbol", fixed = TRUE)
+  })
+
+  it("leaves as.symbol() alone when not in a tidyeval context", {
+    input <- TRUE
+    mr <- metaReactive({
+      !!input
+    })
+    code <- paste(formatCode(withMetaMode(mr())), collapse = "\n")
+    # bare ..(symbol) outside !! should still be defensive
+    expect_match(code, "!!input", fixed = TRUE)
+  })
+}))

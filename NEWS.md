@@ -1,5 +1,7 @@
 # shinymeta (development version)
 
+* Improved generated-code readability for Shiny apps using tidyeval. When `..()` is applied to a symbolic name (e.g., from `varSelectInput()`) and immediately unquoted with `!!`, the generated code now emits the bare symbol instead of `!!as.symbol("foo")`. The same applies to inline `!!sym(..(string))`, `!!as.name(..(string))`, and `!!rlang::sym(..(string))` patterns. (#125)
+
 # shinymeta 0.2.2
 
 * Fixed `mrexprSrcrefToLabel()` crash when Shiny's `sourceUTF8()` wraps app code with a `#line` directive. (#130)
