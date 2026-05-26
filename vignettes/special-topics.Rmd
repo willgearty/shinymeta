@@ -95,7 +95,7 @@ Modifying an existing Shiny app that uses modules may be more involved than simp
 
 ## Shiny, tidyeval, and shinymeta
 
-> TL;DR: The same steps in the [overview](#overview) will work for a Shiny app that uses [tidyeval](https://tidyeval.tidyverse.org/), but it probably won't produce the most readable code. To workaround that, if possible, try to avoid unquoting (i.e., `!!`/`!!!`) by using a functional interface that accepts character strings (instead of symbolic names).
+> TL;DR: The same steps in the [overview](#overview) will work for a Shiny app that uses [tidyeval](https://tidyeval.tidyverse.org/). When the reactive read is unquoted directly with `!!`, the generated code is the same as what you'd write by hand. When the conversion is bound to an intermediate variable, or when you're splicing multiple values with `!!!`, the generated code is functionally correct but reads slightly differently from hand-written code. Switching to `varSelectInput()` or to a function variant that takes character strings (e.g. `across(all_of(...))`) is the simplest fix where possible.
 
 Most **tidyverse** functions evaluate code expressions in a special context (e.g., they search for names within a data frame). That's how **dplyr** knows, for example, to lookup names (e.g. `cyl`) and evaluate calls (e.g., `mean(mpg)`) within a context defined by `mtcars`:
 
@@ -132,7 +132,7 @@ mtcars %>%
   summarise(avg = mean(!!var))
 ```
 
-Often times in a Shiny app we wish to pass an input value to a **tidyverse** function argument (as a variable). In most cases, that requires converting a string into a symbolic name, which can be done via `as.symbol()` or `rlang::sym()`. For example, here's a Shiny app to compute the mean of different `mtcars` variables by cylinder (`cyl`).
+Often times in a Shiny app we wish to pass an input value to a **tidyverse** function argument (as a variable). When the input is a character string, that requires converting it into a symbolic name with `as.symbol()` or `rlang::sym()` and then unquoting the result with `!!`. For example, here's a Shiny app to compute the mean of different `mtcars` variables by cylinder (`cyl`).
 
 ```{r, eval = FALSE}
 library(shiny)
@@ -143,10 +143,9 @@ ui <- fluidPage(
 )
 server <- function(input, output) {
   output$out <- renderPrint({
-    var_sym <- sym(input$var)
     mtcars %>%
       group_by(cyl) %>%
-      summarise(mean_mpg = mean(!!var_sym))
+      summarise(mean_mpg = mean(!!sym(input$var)))
   })
 }
 shinyApp(ui, server)
@@ -157,30 +156,12 @@ Adding **shinymeta** support in this case is straight-forward. As with any other
 ```{r, eval = FALSE}
 server <- function(input, output) {
   output$out <- metaRender(renderPrint, {
-    var_sym <- sym(..(input$var))
     mtcars %>%
       group_by(cyl) %>%
-      summarise(mean_mpg = mean(!!var_sym))
+      summarise(mean_mpg = mean(!!sym(..(input$var))))
   })
   observe(print(expandChain(output$out())))
 }
-```
-
-This pattern also works when you need to convert a character vector of strings into a list of symbolic names (splice them into a function call using `!!!`).
-
-```{r, eval = FALSE}
-ui <- fluidPage(
-  selectInput("var", "Select variables", names(mtcars), multiple = TRUE),
-  verbatimTextOutput("out")
-)
-server <- function(input, output) {
-  output$out <- metaRender(renderPrint, {
-    var_sym <- syms(..(input$var))
-    select(mtcars, !!!var_sym)
-  })
-  observe(print(expandChain(output$out())))
-}
-shinyApp(ui, server)
 ```
 
 In version v1.2.0, **shiny** introduced `varSelectInput()` essentially to remove the need to convert character string(s) into symbolic name(s). For example, in the app below, `input$var` already represents the symbolic name of interest, so you can do:
@@ -200,7 +181,7 @@ server <- function(input, output) {
 shinyApp(ui, server)
 ```
 
-As in the other examples, you can mark the reactive read with `..()` (before unquoting with `!!`) and the code generation should "just work". Technically speaking, this works because, when `..()` encounters a symbolic name that it doesn't recognize, it returns the code *to generate* the symbol instead of the bare symbol (i.e., it returns `as.symbol("mpg")` instead of `mpg` which makes the `!!` work in both normal and meta execution).
+As in the other examples, you can mark the reactive read with `..()` (before unquoting with `!!`) and the code generation should "just work". Technically speaking, this works because, when `..()` encounters a symbolic name that it doesn't recognize, it returns the code *to generate* the symbol instead of the bare symbol (i.e., it returns `as.symbol("mpg")` instead of `mpg` which makes the `!!` work in both normal and meta execution). When deparsed, `metaExpr()` recognizes the `!!as.symbol("foo")` pattern and collapses it back to the bare symbol `foo`, so the generated code matches what you'd write by hand.
 
 ```{r, eval = FALSE}
 server <- function(input, output) {
@@ -214,42 +195,46 @@ server <- function(input, output) {
 shinyApp(ui, server)
 ```
 
-In all the cases we've encountered thus far, the generated code is a bit different from how a human would write it. This last example produces code that looks like this:
+The examples above generate code identical to what a human would write. Two patterns still produce code that differs slightly from hand-written form.
+
+The first is the intermediate-variable form of the `sym()` conversion — binding the result of `sym(..(input$var))` to a name and then unquoting that name with `!!`:
 
 ```{r, eval = FALSE}
-mtcars %>%
-  group_by(cyl) %>%
-  summarise(mean_mpg = mean(!!as.symbol("mpg")))
+server <- function(input, output) {
+  output$out <- metaRender(renderPrint, {
+    var_sym <- sym(..(input$var))
+    mtcars %>%
+      group_by(cyl) %>%
+      summarise(mean_mpg = mean(!!var_sym))
+  })
+}
+shinyApp(ui, server)
 ```
 
-But what you'd probably want your app to generate is this:
+The generated code preserves both the `var_sym` assignment and the `!!var_sym` reference. The fix is the inline form `mean(!!sym(..(input$var)))` shown earlier in this section.
 
-```{r, eval = FALSE}
-mtcars %>%
-  group_by(cyl) %>%
-  summarise(mean_mpg = mean(mpg))
-```
-
-At least currently, there is no great workaround for this problem other than to use alternative **tidyverse** functions that allow you to avoid unquoting by using character strings instead of symbolic names. Most **dplyr** functions provide this alternative through `_at()` variants. These variants allow you to write code like:
-
-```{r, eval = FALSE}
-mtcars %>%
-  group_by(cyl) %>%
-  summarise_at("mpg", mean)
-```
-
-In this case, the implementation of the app is a lot simpler because we don't have to worry about unquoting; plus, the code that the app generates looks a lot more like code a human would write:
+The second is multi-value splicing with `!!!`:
 
 ```{r, eval = FALSE}
 ui <- fluidPage(
-  selectInput("var", "Select a variable", names(mtcars)),
+  selectInput("var", "Select variables", names(mtcars), multiple = TRUE),
   verbatimTextOutput("out")
 )
 server <- function(input, output) {
   output$out <- metaRender(renderPrint, {
-    mtcars %>%
-      group_by(cyl) %>%
-      summarise_at(..(input$var), mean)
+    select(mtcars, !!!syms(..(input$var)))
+  })
+  observe(print(expandChain(output$out())))
+}
+shinyApp(ui, server)
+```
+
+When `input$var` comes from `selectInput(multiple = TRUE)`, the generated code preserves the `!!!syms(...)` call rather than expanding it inline. The code is correct and runs as expected, but `!!!syms(c("mpg", "cyl"))` isn't what you'd write by hand. The simplest workaround is to use a function that takes character strings directly. For column selection specifically, the tidyselect helper `all_of()` works directly inside `select()`:
+
+```{r, eval = FALSE}
+server <- function(input, output) {
+  output$out <- metaRender(renderPrint, {
+    select(mtcars, all_of(..(input$var)))
   })
   observe(print(expandChain(output$out())))
 }

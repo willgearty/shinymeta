@@ -459,6 +459,7 @@ metaExpr <- function(expr, env = parent.frame(), quoted = FALSE, localize = "aut
   withMetaMode(mode = TRUE, {
     expr <- comment_flags(expr)
     expr <- expandExpr(expr, env)
+    expr <- simplify_unquoted_symbols(expr)
     expr <- strip_outer_brace(expr)
 
     # Note that bindToReturn won't make sense for a localized call,

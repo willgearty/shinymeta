@@ -107,6 +107,23 @@ comment_flags_to_enclosings <- function(expr) {
   })
 }
 
+# Simplify `!!as.symbol("foo")` to `foo` in tidyeval contexts
+simplify_unquoted_symbols <- function(expr) {
+  walk_ast(expr, function(x) {
+    if (!rlang::is_call(x, "!", n = 1)) return(x)
+    if (!rlang::is_call(x[[2]], "!", n = 1)) return(x)
+
+    inner <- x[[2]][[2]]
+    if (!is_sym_constructor(inner)) return(x)
+
+    arg <- inner[[2]]
+    if (!is.character(arg) || length(arg) != 1 || is.na(arg) || !nzchar(arg)) {
+      return(x)
+    }
+    as.symbol(arg)
+  })
+}
+
 
 # ---------------------------------------------------------
 # Helpers
@@ -135,6 +152,25 @@ is_comment <- function(x) {
 
 is_illegal <- function(x) {
   identical(attr(x, "shinymeta_comment"), "illegal")
+}
+
+# Recognize `as.symbol(x)`, `as.name(x)`, `rlang::sym(x)`, `base::as.symbol(x)`,
+# etc. — any single-arg call to a known string-to-symbol constructor.
+is_sym_constructor <- function(x) {
+  if (!is.call(x) || length(x) != 2L) return(FALSE)
+  fn <- x[[1]]
+  if (is.symbol(fn)) {
+    return(as.character(fn) %in% c("as.symbol", "as.name", "sym"))
+  }
+  if (rlang::is_call(fn, "::", n = 2)) {
+    pkg <- as.character(fn[[2]])
+    nm  <- as.character(fn[[3]])
+    return(
+      (pkg == "base"  && nm %in% c("as.symbol", "as.name")) ||
+        (pkg == "rlang" && nm == "sym")
+    )
+  }
+  FALSE
 }
 
 
