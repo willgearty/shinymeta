@@ -233,6 +233,23 @@ expandChain(output$plot(), .expansionContext = ec)
 expandChain(output$summary(), .expansionContext = ec)
 ```
 
+The expansion context is stateful — each `expandChain()` call records the `metaReactive` objects it has emitted, and subsequent calls using the same context will suppress those definitions. The synchronous, top-level usage above works fine because the two calls happen as one batch. In a Shiny app, where individual outputs invalidate and re-render independently, you should create the expansion context inside a single reactive that produces all the related chunks together, and then have each output read its chunk from that reactive:
+
+```{r, eval = FALSE}
+chunks <- reactive({
+  ec <- newExpansionContext()
+  list(
+    plot    = expandChain(output$plot(),    .expansionContext = ec),
+    summary = expandChain(output$summary(), .expansionContext = ec)
+  )
+})
+
+output$code_plot    <- renderPrint(chunks()$plot)
+output$code_summary <- renderPrint(chunks()$summary)
+```
+
+If instead you create the expansion context at the top of `server()` and use it from multiple `renderPrint()` outputs directly, a chunk can render empty after an input change: the context still remembers definitions emitted on a previous render, so when one of the consuming outputs re-runs in isolation, it suppresses the definitions that would otherwise have appeared in its chunk.
+
 Expansion contexts are also useful for cases where you need to redefine a meta-reactive's logic. This is useful in at least two scenarios:
 
 1. For efficiency or privacy reasons, you may not want to provide the "rawest" form of the data in your app to users. Instead, you might want to only provide a transformed and/or summarized version of the data. For example, instead of providing the user with `downloads`, we could provide `downloads_rolling` as file to be [included as part of a download bundle](code-distribution.html#including-other-files).

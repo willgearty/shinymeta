@@ -660,6 +660,35 @@ print.shinymetaExpansionContext <- function(x, ...) {
 #' After this code is run, `chunk1` contains only the definition of `nums` and
 #' `chunk2` contains only the code for `obs`.
 #'
+#' Note that the expansion context is stateful: each `expandChain()` call
+#' records which `metaReactive` objects have already been emitted, and
+#' subsequent calls using the same context will suppress those definitions.
+#' This assumes the full sequence of `expandChain()` calls happens as a single
+#' batch.
+#'
+#' In a Shiny app, where individual outputs invalidate and re-render
+#' independently, this means a shared expansion context should be created
+#' inside a reactive expression that produces all the related chunks together,
+#' rather than at the top level of `server()`. If the context is created at
+#' the top level and consumed by multiple outputs, a partial invalidation can
+#' leave one of the chunks empty: the context remembers the definitions
+#' emitted on the previous render, and the re-rendering output skips them.
+#'
+#' ```
+#'     chunks <- reactive({
+#'       ec <- newExpansionContext()
+#'       list(
+#'         setup = expandChain(.expansionContext = ec, quote(library(ggplot2))),
+#'         data  = expandChain(.expansionContext = ec, filtered()),
+#'         plot  = expandChain(.expansionContext = ec, output$plot())
+#'       )
+#'     })
+#'
+#'     output$code_setup <- renderPrint(chunks()$setup)
+#'     output$code_data  <- renderPrint(chunks()$data)
+#'     output$code_plot  <- renderPrint(chunks()$plot)
+#' ```
+#'
 #' @section Substituting `metaReactive` objects:
 #'
 #' Sometimes, when generating code, we want to completely replace the

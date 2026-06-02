@@ -131,6 +131,34 @@ the two calls.
 
 After this code is run, \code{chunk1} contains only the definition of \code{nums} and
 \code{chunk2} contains only the code for \code{obs}.
+
+Note that the expansion context is stateful: each \code{expandChain()} call
+records which \code{metaReactive} objects have already been emitted, and
+subsequent calls using the same context will suppress those definitions.
+This assumes the full sequence of \code{expandChain()} calls happens as a single
+batch.
+
+In a Shiny app, where individual outputs invalidate and re-render
+independently, this means a shared expansion context should be created
+inside a reactive expression that produces all the related chunks together,
+rather than at the top level of \code{server()}. If the context is created at
+the top level and consumed by multiple outputs, a partial invalidation can
+leave one of the chunks empty: the context remembers the definitions
+emitted on the previous render, and the re-rendering output skips them.
+
+\if{html}{\out{<div class="sourceCode">}}\preformatted{    chunks <- reactive(\{
+      ec <- newExpansionContext()
+      list(
+        setup = expandChain(.expansionContext = ec, quote(library(ggplot2))),
+        data  = expandChain(.expansionContext = ec, filtered()),
+        plot  = expandChain(.expansionContext = ec, output$plot())
+      )
+    \})
+
+    output$code_setup <- renderPrint(chunks()$setup)
+    output$code_data  <- renderPrint(chunks()$data)
+    output$code_plot  <- renderPrint(chunks()$plot)
+}\if{html}{\out{</div>}}
 }
 
 \section{Substituting \code{metaReactive} objects}{
