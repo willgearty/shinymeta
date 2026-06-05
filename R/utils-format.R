@@ -107,9 +107,13 @@ comment_flags_to_enclosings <- function(expr) {
   })
 }
 
-# Simplify `!!as.symbol("foo")` to `foo` in tidyeval contexts
+# Simplify `!!as.symbol("foo")` to `foo` in tidyeval contexts and strip the
+# redundant parens left around a bare symbol
 simplify_unquoted_symbols <- function(expr) {
   walk_ast(expr, function(x) {
+    # drop redundant parens left wrapping a bare symbol
+    if (rlang::is_call(x, "(", n = 1) && is.symbol(x[[2]])) return(x[[2]])
+
     if (!rlang::is_call(x, "!", n = 1)) return(x)
     if (!rlang::is_call(x[[2]], "!", n = 1)) return(x)
 
